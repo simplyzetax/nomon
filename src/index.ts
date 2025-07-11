@@ -15,6 +15,8 @@ import {
 	DEFAULT_CACHE_TTL,
 	MAX_CACHE_TTL,
 } from './utils/cache';
+import { systemStats } from './db/schema';
+import { CasingCache } from 'drizzle-orm/casing';
 
 export { DNSStorage } from './durable-objects/storage';
 
