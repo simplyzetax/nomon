@@ -1,8 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
-import { eq, and, desc, count, sql } from 'drizzle-orm';
-import { blocklistEntries, dnsQueryLogs, dnsQuestions, dnsAnswers, blockedDomainsLog, systemStats } from '../db/schema.js';
-import type { DNSQuestion, DNSAnswer, BlockedDomain } from '../types/dns.js';
+import { eq, and, sql } from 'drizzle-orm';
+import { blocklistEntries, systemStats } from '../db/schema.js';
 import { COMPILED_BLOCKLIST } from 'virtual:compiled-blocklist';
 
 export class DNSStorage extends DurableObject {
@@ -269,7 +268,10 @@ CREATE UNIQUE INDEX \`system_stats_key_unique\` ON \`system_stats\` (\`key\`);
 	}
 
 	private async _updateBlocklistSize(): Promise<void> {
-		const dbResult = await this.db.select({ count: count() }).from(blocklistEntries).where(eq(blocklistEntries.isActive, true));
+		const dbResult = await this.db
+			.select({ count: sql<number>`count(*)` })
+			.from(blocklistEntries)
+			.where(eq(blocklistEntries.isActive, true));
 		const dbCount = dbResult[0].count;
 		const compiledCount = COMPILED_BLOCKLIST?.size || 0;
 		const totalCount = dbCount + compiledCount;
