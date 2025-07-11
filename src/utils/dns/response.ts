@@ -65,9 +65,12 @@ export class DNSResponse {
 	 * Create a Response object from upstream DNS response
 	 */
 	static createUpstreamHttpResponse(responseBuffer: ArrayBuffer, upstreamResponse: Response): Response {
+		// Create a new Headers object to avoid immutable header issues
+		const headers = new Headers(upstreamResponse.headers);
+
 		return new Response(responseBuffer, {
 			status: upstreamResponse.status,
-			headers: upstreamResponse.headers,
+			headers: headers,
 		});
 	}
 

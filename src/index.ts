@@ -87,8 +87,15 @@ app.get('*', async (c) => {
 			if (cachedResponse) {
 				const processingTime = Date.now() - startTime;
 
-				const response = cachedResponse.clone();
-				response.headers.set('X-DNS-Cache-Hit', 'true');
+				// Create a new Response with mutable headers
+				const headers = new Headers(cachedResponse.headers);
+				headers.set('X-DNS-Cache-Hit', 'true');
+
+				const response = new Response(cachedResponse.body, {
+					status: cachedResponse.status,
+					statusText: cachedResponse.statusText,
+					headers: headers,
+				});
 				return response;
 			}
 
@@ -175,8 +182,15 @@ app.post('*', async (c) => {
 			if (cachedResponse) {
 				const processingTime = Date.now() - startTime;
 
-				const response = cachedResponse.clone();
-				response.headers.set('X-DNS-Cache-Hit', 'true');
+				// Create a new Response with mutable headers
+				const headers = new Headers(cachedResponse.headers);
+				headers.set('X-DNS-Cache-Hit', 'true');
+
+				const response = new Response(cachedResponse.body, {
+					status: cachedResponse.status,
+					statusText: cachedResponse.statusText,
+					headers: headers,
+				});
 				return response;
 			}
 
