@@ -1,18 +1,26 @@
-import type { DNSQuestion } from '../types/dns';
 import { DNSParser } from './dns/parser';
 import { Logger } from './logger';
+import type { DNSQuestion } from '../types/dns';
 
+// Cache configuration
 export const CACHE_NAME = 'dns-cache';
 export const DEFAULT_CACHE_TTL = 300; // 5 minutes default
 export const MAX_CACHE_TTL = 3600; // 1 hour max
+
 export function generateCacheKey(questions: DNSQuestion[]): string {
 	// Create a deterministic cache key based on the DNS questions
-	const key = questions
+	const queryParams = questions
 		.map((q) => `${q.name.toLowerCase()}:${q.type}:${q.class || 'IN'}`)
 		.sort()
 		.join('|');
-	return `dns:${key}`;
+
+	// Create a valid URL for the cache key
+	// Use a dummy domain with the query as search params
+	const url = new URL('https://dns-cache.local/query');
+	url.searchParams.set('q', queryParams);
+	return url.toString();
 }
+
 export function extractTTLFromResponse(responseBuffer: ArrayBuffer): number {
 	try {
 		const parsedResponse = DNSParser.parseResponse(Buffer.from(responseBuffer));
@@ -26,10 +34,12 @@ export function extractTTLFromResponse(responseBuffer: ArrayBuffer): number {
 	}
 	return DEFAULT_CACHE_TTL;
 }
+
 export async function getCachedResponse(cacheKey: string): Promise<Response | null> {
 	try {
 		const cache = await caches.open(CACHE_NAME);
-		const cachedResponse = await cache.match(cacheKey);
+		const request = new Request(cacheKey);
+		const cachedResponse = await cache.match(request);
 		if (cachedResponse) {
 			Logger.log('Cache HIT for key:', cacheKey);
 			return cachedResponse;
@@ -41,6 +51,7 @@ export async function getCachedResponse(cacheKey: string): Promise<Response | nu
 		return null;
 	}
 }
+
 export async function cacheResponse(cacheKey: string, response: Response, ttl: number): Promise<void> {
 	try {
 		const cache = await caches.open(CACHE_NAME);
@@ -58,7 +69,8 @@ export async function cacheResponse(cacheKey: string, response: Response, ttl: n
 			headers: headers,
 		});
 
-		await cache.put(cacheKey, cachedResponse);
+		const request = new Request(cacheKey);
+		await cache.put(request, cachedResponse);
 		Logger.log(`Cached response for key: ${cacheKey} with TTL: ${ttl}s`);
 	} catch (error) {
 		Logger.error('Error caching response:', error);

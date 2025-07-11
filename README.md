@@ -6,6 +6,8 @@ A high-performance DNS-over-HTTPS proxy built for Cloudflare Workers with integr
 
 - Add a webinterface / api for adding custom blocklists globally
 - Add the ability to redirect existing hostnames to custom IPs
+  Use D1 to get custom DNS queries in constructor or similar
+  Store them in the Durable Object SQL for faster access
 
 ## ✨ Features
 

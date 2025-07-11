@@ -257,100 +257,6 @@ CREATE UNIQUE INDEX \`system_stats_key_unique\` ON \`system_stats\` (\`key\`);
 		return await this.db.select().from(blocklistEntries).where(eq(blocklistEntries.isActive, true)).limit(limit).offset(offset);
 	}
 
-	async logDNSQuery(
-		queryId: number,
-		questions: DNSQuestion[],
-		clientIp?: string,
-		blocked: boolean = false,
-		processingTimeMs?: number
-	): Promise<number> {
-		const logResult = await this.db
-			.insert(dnsQueryLogs)
-			.values({
-				queryId,
-				clientIp,
-				queryType: 'query',
-				blocked,
-				processingTimeMs,
-			})
-			.returning({ id: dnsQueryLogs.id });
-
-		const logId = logResult[0].id;
-
-		if (questions.length > 0) {
-			const questionData = questions.map((q) => ({
-				logId,
-				name: q.name.toLowerCase(),
-				type: q.type,
-				class: q.class,
-			}));
-			await this.db.insert(dnsQuestions).values(questionData);
-		}
-
-		await this._incrementStat('total_queries');
-		if (blocked) {
-			await this._incrementStat('total_blocked');
-		}
-
-		return logId;
-	}
-
-	async logDNSResponse(queryId: number, answers: DNSAnswer[], processingTimeMs?: number): Promise<void> {
-		const logResult = await this.db
-			.insert(dnsQueryLogs)
-			.values({
-				queryId,
-				queryType: 'response',
-				blocked: false,
-				processingTimeMs,
-			})
-			.returning({ id: dnsQueryLogs.id });
-
-		const logId = logResult[0].id;
-
-		if (answers.length > 0) {
-			const answerData = answers.map((a) => ({
-				logId,
-				name: a.name.toLowerCase(),
-				type: a.type,
-				class: a.class || 'IN',
-				ttl: a.ttl,
-				data: JSON.stringify(a.data),
-			}));
-			await this.db.insert(dnsAnswers).values(answerData);
-		}
-	}
-
-	async logBlockedDomain(domain: string, reason: string, exactMatch: boolean, parentDomain?: string, queryLogId?: number): Promise<void> {
-		await this.db.insert(blockedDomainsLog).values({
-			domain: domain.toLowerCase(),
-			reason,
-			exactMatch,
-			parentDomain,
-			queryLogId,
-		});
-	}
-
-	async getRecentQueries(limit: number = 50) {
-		return await this.db
-			.select({
-				id: dnsQueryLogs.id,
-				queryId: dnsQueryLogs.queryId,
-				timestamp: dnsQueryLogs.timestamp,
-				clientIp: dnsQueryLogs.clientIp,
-				queryType: dnsQueryLogs.queryType,
-				blocked: dnsQueryLogs.blocked,
-				processingTimeMs: dnsQueryLogs.processingTimeMs,
-			})
-			.from(dnsQueryLogs)
-			.orderBy(desc(dnsQueryLogs.timestamp))
-			.limit(limit);
-	}
-
-	async getRecentBlockedDomains(limit: number = 50) {
-		return await this.db.select().from(blockedDomainsLog).orderBy(desc(blockedDomainsLog.blockedAt)).limit(limit);
-	}
-
 	async getStatistics() {
 		const stats = await this.db.select().from(systemStats);
 		const statsObj: Record<string, string> = {};
@@ -360,18 +266,6 @@ CREATE UNIQUE INDEX \`system_stats_key_unique\` ON \`system_stats\` (\`key\`);
 		}
 
 		return statsObj;
-	}
-
-	async getQueryCount(): Promise<number> {
-		const result = await this.db.select({ count: count() }).from(dnsQueryLogs);
-
-		return result[0].count;
-	}
-
-	async getBlockedCount(): Promise<number> {
-		const result = await this.db.select({ count: count() }).from(dnsQueryLogs).where(eq(dnsQueryLogs.blocked, true));
-
-		return result[0].count;
 	}
 
 	private async _updateBlocklistSize(): Promise<void> {

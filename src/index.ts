@@ -15,8 +15,6 @@ import {
 	DEFAULT_CACHE_TTL,
 	MAX_CACHE_TTL,
 } from './utils/cache';
-import { systemStats } from './db/schema';
-import { CasingCache } from 'drizzle-orm/casing';
 
 export { DNSStorage } from './durable-objects/storage';
 
@@ -34,8 +32,6 @@ app.get('/stats', async (c) => {
 	const coloId = c.env.DNS_STORAGE.idFromName(colo);
 	const storage = c.env.DNS_STORAGE.get(coloId);
 	const stats = await storage.getStatistics();
-	const recentQueries = await storage.getRecentQueries(10);
-	const recentBlocked = await storage.getRecentBlockedDomains(10);
 
 	let cacheStats = {};
 	try {
@@ -56,8 +52,6 @@ app.get('/stats', async (c) => {
 	return c.json({
 		statistics: stats,
 		cacheStats,
-		recentQueries,
-		recentBlocked,
 	});
 });
 
@@ -85,24 +79,6 @@ app.get('*', async (c) => {
 			if (blockingResult.blocked) {
 				const processingTime = Date.now() - startTime;
 
-				const logId = await storage.logDNSQuery(
-					parsedQuery.id,
-					parsedQuery.questions,
-					c.req.header('CF-Connecting-IP'),
-					true,
-					processingTime
-				);
-
-				for (const blockedDomain of blockingResult.blockedDomains) {
-					await storage.logBlockedDomain(
-						blockedDomain.domain,
-						blockedDomain.reason,
-						blockedDomain.exactMatch,
-						blockedDomain.parentDomain,
-						logId
-					);
-				}
-
 				const blockedResponse = DNSResponse.createBlockedResponse(parsedQuery);
 				return DNSResponse.createBlockedHttpResponse(blockedResponse);
 			}
@@ -110,8 +86,6 @@ app.get('*', async (c) => {
 			const cachedResponse = await getCachedResponse(cacheKey);
 			if (cachedResponse) {
 				const processingTime = Date.now() - startTime;
-
-				await storage.logDNSQuery(parsedQuery.id, parsedQuery.questions, c.req.header('CF-Connecting-IP'), false, processingTime);
 
 				const response = cachedResponse.clone();
 				response.headers.set('X-DNS-Cache-Hit', 'true');
@@ -131,18 +105,6 @@ app.get('*', async (c) => {
 				DNSParser.logResponse(parsedResponse);
 
 				const processingTime = Date.now() - startTime;
-
-				const logId = await storage.logDNSQuery(
-					parsedQuery.id,
-					parsedQuery.questions,
-					c.req.header('CF-Connecting-IP'),
-					false,
-					processingTime
-				);
-
-				if (parsedResponse.answers) {
-					await storage.logDNSResponse(parsedQuery.id, parsedResponse.answers, processingTime);
-				}
 
 				const httpResponse = DNSResponse.createUpstreamHttpResponse(responseBuffer, res);
 
@@ -205,24 +167,6 @@ app.post('*', async (c) => {
 			if (blockingResult.blocked) {
 				const processingTime = Date.now() - startTime;
 
-				const logId = await storage.logDNSQuery(
-					parsedQuery.id,
-					parsedQuery.questions,
-					c.req.header('CF-Connecting-IP'),
-					true,
-					processingTime
-				);
-
-				for (const blockedDomain of blockingResult.blockedDomains) {
-					await storage.logBlockedDomain(
-						blockedDomain.domain,
-						blockedDomain.reason,
-						blockedDomain.exactMatch,
-						blockedDomain.parentDomain,
-						logId
-					);
-				}
-
 				const blockedResponse = DNSResponse.createBlockedResponse(parsedQuery);
 				return DNSResponse.createBlockedHttpResponse(blockedResponse);
 			}
@@ -230,8 +174,6 @@ app.post('*', async (c) => {
 			const cachedResponse = await getCachedResponse(cacheKey);
 			if (cachedResponse) {
 				const processingTime = Date.now() - startTime;
-
-				await storage.logDNSQuery(parsedQuery.id, parsedQuery.questions, c.req.header('CF-Connecting-IP'), false, processingTime);
 
 				const response = cachedResponse.clone();
 				response.headers.set('X-DNS-Cache-Hit', 'true');
@@ -253,18 +195,6 @@ app.post('*', async (c) => {
 				DNSParser.logResponse(parsedResponse, 'RESPONSE (POST)');
 
 				const processingTime = Date.now() - startTime;
-
-				const logId = await storage.logDNSQuery(
-					parsedQuery.id,
-					parsedQuery.questions,
-					c.req.header('CF-Connecting-IP'),
-					false,
-					processingTime
-				);
-
-				if (parsedResponse.answers) {
-					await storage.logDNSResponse(parsedQuery.id, parsedResponse.answers, processingTime);
-				}
 
 				const httpResponse = DNSResponse.createUpstreamHttpResponse(responseBuffer, res);
 
