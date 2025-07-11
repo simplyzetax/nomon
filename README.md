@@ -2,6 +2,11 @@
 
 A high-performance DNS-over-HTTPS proxy built for Cloudflare Workers with integrated Pi-hole blocklist filtering.
 
+## TODO
+
+- Add a webinterface / api for adding custom blocklists globally
+- Add the ability to redirect existing hostnames to custom IPs
+
 ## ✨ Features
 
 - **DNS-over-HTTPS Proxy**: Forwards DNS queries to Cloudflare's secure DNS
@@ -31,11 +36,10 @@ pnpm deploy
 ```
 src/
 ├── types/           # TypeScript interfaces
-├── utils/           # Constants and logging
-├── dns/             # DNS parsing and response handling
-├── blocklist/       # Domain blocking logic
+├── utils/           # Utilities for blocking, logging etc
+├── durable-objects/ # The durable object used for DNS queries
+├── db/ # Drizzle database schemas etc
 └── index.ts         # Main application
-
 plugins/
 └── blocklist-compiler.ts  # Build-time blocklist optimization
 ```
@@ -43,7 +47,7 @@ plugins/
 ## ⚡ Performance
 
 - **Zero Runtime Parsing**: Pi-hole blocklist compiled at build time
-- **O(1) Domain Lookups**: Optimized Set-based blocking
+- **O(1) Domain Lookups**: Lightning fast database lookup with Set.has() backup
 - **Fast Cold Starts**: No initialization overhead
 - **Subdomain Blocking**: Automatically blocks subdomains of listed domains
 
