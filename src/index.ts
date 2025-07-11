@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-// Import the pre-compiled Pi-hole blocklist from Vite plugin
 import { COMPILED_BLOCKLIST, BLOCKLIST_STATS } from 'virtual:compiled-blocklist';
 
 // Import our modular components
