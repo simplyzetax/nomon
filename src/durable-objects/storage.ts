@@ -164,20 +164,6 @@ CREATE UNIQUE INDEX \`system_stats_key_unique\` ON \`system_stats\` (\`key\`);
 	}> {
 		const normalizedDomain = domain.toLowerCase();
 
-		const exactMatchDb = await this.db
-			.select({ domain: blocklistEntries.domain })
-			.from(blocklistEntries)
-			.where(and(eq(blocklistEntries.domain, normalizedDomain), eq(blocklistEntries.isActive, true)))
-			.limit(1);
-
-		if (exactMatchDb.length > 0) {
-			return {
-				isBlocked: true,
-				exactMatch: true,
-				reason: 'Domain exactly matches blocklist entry',
-			};
-		}
-
 		const parts = normalizedDomain.split('.');
 		for (let i = 1; i < parts.length; i++) {
 			const parentDomain = parts.slice(i).join('.');
@@ -215,6 +201,20 @@ CREATE UNIQUE INDEX \`system_stats_key_unique\` ON \`system_stats\` (\`key\`);
 					reason: `Subdomain of blocked domain in compiled blocklist: ${parentDomain}`,
 				};
 			}
+		}
+
+		const exactMatchDb = await this.db
+			.select({ domain: blocklistEntries.domain })
+			.from(blocklistEntries)
+			.where(and(eq(blocklistEntries.domain, normalizedDomain), eq(blocklistEntries.isActive, true)))
+			.limit(1);
+
+		if (exactMatchDb.length > 0) {
+			return {
+				isBlocked: true,
+				exactMatch: true,
+				reason: 'Domain exactly matches blocklist entry',
+			};
 		}
 
 		return {
