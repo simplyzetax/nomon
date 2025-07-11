@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-// Import the Pi-hole blocklist as raw text
-import piHoleList from '../lists/pi-hole.txt?raw';
+// Import the pre-compiled Pi-hole blocklist from Vite plugin
+import { COMPILED_BLOCKLIST, BLOCKLIST_STATS } from 'virtual:compiled-blocklist';
 
 // Import our modular components
 import { DNSParser } from './dns/parser.js';
@@ -8,12 +8,12 @@ import { DNSResponse } from './dns/response.js';
 import { BlocklistLoader } from './blocklist/loader.js';
 import { DomainChecker } from './blocklist/checker.js';
 import { Logger } from './utils/logger.js';
-import { DOH_ENDPOINT, DOH_JSON_ENDPOINT, DNS_MESSAGE_CONTENT_TYPE, DNS_JSON_CONTENT_TYPE } from './utils/constants';
+import { DOH_ENDPOINT, DOH_JSON_ENDPOINT, DNS_MESSAGE_CONTENT_TYPE, DNS_JSON_CONTENT_TYPE } from './utils/constants.js';
 
 const app = new Hono();
 
-// Initialize the blocklist
-BlocklistLoader.loadBlocklist(piHoleList);
+// Initialize the blocklist with pre-compiled data
+BlocklistLoader.loadCompiledBlocklist(COMPILED_BLOCKLIST, BLOCKLIST_STATS);
 
 // Handle GET requests with dns query parameter (DNS wire format)
 app.get('*', async (c) => {
