@@ -1,37 +1,121 @@
 import { Hono } from 'hono';
-import { COMPILED_BLOCKLIST, BLOCKLIST_STATS } from 'virtual:compiled-blocklist';
 
-// Import our modular components
-import { DNSParser } from './dns/parser.js';
-import { DNSResponse } from './dns/response.js';
-import { BlocklistLoader } from './blocklist/loader.js';
-import { DomainChecker } from './blocklist/checker.js';
-import { Logger } from './utils/logger.js';
-import { DOH_ENDPOINT, DOH_JSON_ENDPOINT, DNS_MESSAGE_CONTENT_TYPE, DNS_JSON_CONTENT_TYPE } from './utils/constants.js';
+import { DNSParser } from './utils/dns/parser';
+import { DNSResponse } from './utils/dns/response';
+import { Logger } from './utils/logger';
+import { DOH_ENDPOINT, DOH_JSON_ENDPOINT, DNS_MESSAGE_CONTENT_TYPE, DNS_JSON_CONTENT_TYPE } from './utils/constants';
+import { DNSStorage } from './durable-objects/storage';
+import type { DNSQuestion } from './types/dns';
+import {
+	generateCacheKey,
+	getCachedResponse,
+	extractTTLFromResponse,
+	cacheResponse,
+	CACHE_NAME,
+	DEFAULT_CACHE_TTL,
+	MAX_CACHE_TTL,
+} from './utils/cache';
 
-const app = new Hono();
+export { DNSStorage } from './durable-objects/storage';
 
-// Initialize the blocklist with pre-compiled data
-BlocklistLoader.loadCompiledBlocklist(COMPILED_BLOCKLIST, BLOCKLIST_STATS);
+const app = new Hono<{
+	Bindings: {
+		DNS_STORAGE: DurableObjectNamespace<DNSStorage>;
+	};
+}>();
 
-// Handle GET requests with dns query parameter (DNS wire format)
+app.get('/stats', async (c) => {
+	const colo = c.req.raw.cf?.colo;
+	if (!colo || typeof colo !== 'string') {
+		return c.json({ error: 'Invalid request' }, 400);
+	}
+	const coloId = c.env.DNS_STORAGE.idFromName(colo);
+	const storage = c.env.DNS_STORAGE.get(coloId);
+	const stats = await storage.getStatistics();
+	const recentQueries = await storage.getRecentQueries(10);
+	const recentBlocked = await storage.getRecentBlockedDomains(10);
+
+	let cacheStats = {};
+	try {
+		const cache = await caches.open(CACHE_NAME);
+		cacheStats = {
+			cacheEnabled: true,
+			cacheName: CACHE_NAME,
+			defaultTTL: DEFAULT_CACHE_TTL,
+			maxTTL: MAX_CACHE_TTL,
+		};
+	} catch (error) {
+		cacheStats = {
+			cacheEnabled: false,
+			error: 'Cache not available',
+		};
+	}
+
+	return c.json({
+		statistics: stats,
+		cacheStats,
+		recentQueries,
+		recentBlocked,
+	});
+});
+
 app.get('*', async (c) => {
+	const colo = c.req.raw.cf?.colo;
+	if (!colo || typeof colo !== 'string') {
+		return c.json({ error: 'Invalid request' }, 400);
+	}
+
+	const coloId = c.env.DNS_STORAGE.idFromName(colo);
+
 	const dns = c.req.query('dns');
 	if (dns) {
+		const startTime = Date.now();
 		try {
-			// Parse the base64 DNS query
 			const parsedQuery = DNSParser.parseBase64Query(dns);
 			DNSParser.logQuery(parsedQuery);
 
-			// Check if any queried domain should be blocked
-			const blockingResult = DomainChecker.checkDNSQuestions(parsedQuery.questions);
+			const cacheKey = generateCacheKey(parsedQuery.questions);
+
+			const storage = c.env.DNS_STORAGE.get(coloId);
+			const domains = parsedQuery.questions.map((q: DNSQuestion) => q.name);
+			const blockingResult = await storage.checkDomains(domains);
 
 			if (blockingResult.blocked) {
+				const processingTime = Date.now() - startTime;
+
+				const logId = await storage.logDNSQuery(
+					parsedQuery.id,
+					parsedQuery.questions,
+					c.req.header('CF-Connecting-IP'),
+					true,
+					processingTime
+				);
+
+				for (const blockedDomain of blockingResult.blockedDomains) {
+					await storage.logBlockedDomain(
+						blockedDomain.domain,
+						blockedDomain.reason,
+						blockedDomain.exactMatch,
+						blockedDomain.parentDomain,
+						logId
+					);
+				}
+
 				const blockedResponse = DNSResponse.createBlockedResponse(parsedQuery);
 				return DNSResponse.createBlockedHttpResponse(blockedResponse);
 			}
 
-			// Forward to upstream DNS
+			const cachedResponse = await getCachedResponse(cacheKey);
+			if (cachedResponse) {
+				const processingTime = Date.now() - startTime;
+
+				await storage.logDNSQuery(parsedQuery.id, parsedQuery.questions, c.req.header('CF-Connecting-IP'), false, processingTime);
+
+				const response = cachedResponse.clone();
+				response.headers.set('X-DNS-Cache-Hit', 'true');
+				return response;
+			}
+
 			const res = await fetch(`${DOH_ENDPOINT}?dns=${dns}`, {
 				method: 'GET',
 				headers: {
@@ -39,13 +123,32 @@ app.get('*', async (c) => {
 				},
 			});
 
-			// Parse and log the response
 			if (res.ok) {
 				const responseBuffer = await res.arrayBuffer();
 				const parsedResponse = DNSParser.parseResponse(Buffer.from(responseBuffer));
 				DNSParser.logResponse(parsedResponse);
 
-				return DNSResponse.createUpstreamHttpResponse(responseBuffer, res);
+				const processingTime = Date.now() - startTime;
+
+				const logId = await storage.logDNSQuery(
+					parsedQuery.id,
+					parsedQuery.questions,
+					c.req.header('CF-Connecting-IP'),
+					false,
+					processingTime
+				);
+
+				if (parsedResponse.answers) {
+					await storage.logDNSResponse(parsedQuery.id, parsedResponse.answers, processingTime);
+				}
+
+				const httpResponse = DNSResponse.createUpstreamHttpResponse(responseBuffer, res);
+
+				const ttl = extractTTLFromResponse(responseBuffer);
+				await cacheResponse(cacheKey, httpResponse, ttl);
+
+				httpResponse.headers.set('X-DNS-Cache-Hit', 'false');
+				return httpResponse;
 			}
 
 			return res;
@@ -71,26 +174,68 @@ app.get('*', async (c) => {
 	return c.notFound();
 });
 
-// Handle POST requests with DNS message content-type
 app.post('*', async (c) => {
 	const contentType = c.req.header('content-type');
+
+	const colo = c.req.raw.cf?.colo;
+	if (!colo || typeof colo !== 'string') {
+		return c.json({ error: 'Invalid request' }, 400);
+	}
+
+	Logger.log('POST request received');
+	const coloId = c.env.DNS_STORAGE.idFromName(colo);
+	Logger.log('Colo ID:', coloId);
+
 	if (contentType === DNS_MESSAGE_CONTENT_TYPE) {
+		const startTime = Date.now();
 		try {
-			// Parse the raw DNS query
 			const requestBody = await c.req.arrayBuffer();
 			const requestBuffer = Buffer.from(requestBody);
 			const parsedQuery = DNSParser.parseRawQuery(requestBuffer);
 			DNSParser.logQuery(parsedQuery, 'QUERY (POST)');
 
-			// Check if any queried domain should be blocked
-			const blockingResult = DomainChecker.checkDNSQuestions(parsedQuery.questions);
+			const cacheKey = generateCacheKey(parsedQuery.questions);
+
+			const storage = c.env.DNS_STORAGE.get(coloId);
+			const domains = parsedQuery.questions.map((q: any) => q.name);
+			const blockingResult = await storage.checkDomains(domains);
 
 			if (blockingResult.blocked) {
+				const processingTime = Date.now() - startTime;
+
+				const logId = await storage.logDNSQuery(
+					parsedQuery.id,
+					parsedQuery.questions,
+					c.req.header('CF-Connecting-IP'),
+					true,
+					processingTime
+				);
+
+				for (const blockedDomain of blockingResult.blockedDomains) {
+					await storage.logBlockedDomain(
+						blockedDomain.domain,
+						blockedDomain.reason,
+						blockedDomain.exactMatch,
+						blockedDomain.parentDomain,
+						logId
+					);
+				}
+
 				const blockedResponse = DNSResponse.createBlockedResponse(parsedQuery);
 				return DNSResponse.createBlockedHttpResponse(blockedResponse);
 			}
 
-			// Forward to upstream DNS
+			const cachedResponse = await getCachedResponse(cacheKey);
+			if (cachedResponse) {
+				const processingTime = Date.now() - startTime;
+
+				await storage.logDNSQuery(parsedQuery.id, parsedQuery.questions, c.req.header('CF-Connecting-IP'), false, processingTime);
+
+				const response = cachedResponse.clone();
+				response.headers.set('X-DNS-Cache-Hit', 'true');
+				return response;
+			}
+
 			const res = await fetch(DOH_ENDPOINT, {
 				method: 'POST',
 				headers: {
@@ -100,13 +245,32 @@ app.post('*', async (c) => {
 				body: requestBuffer,
 			});
 
-			// Parse and log the response
 			if (res.ok) {
 				const responseBuffer = await res.arrayBuffer();
 				const parsedResponse = DNSParser.parseResponse(Buffer.from(responseBuffer));
 				DNSParser.logResponse(parsedResponse, 'RESPONSE (POST)');
 
-				return DNSResponse.createUpstreamHttpResponse(responseBuffer, res);
+				const processingTime = Date.now() - startTime;
+
+				const logId = await storage.logDNSQuery(
+					parsedQuery.id,
+					parsedQuery.questions,
+					c.req.header('CF-Connecting-IP'),
+					false,
+					processingTime
+				);
+
+				if (parsedResponse.answers) {
+					await storage.logDNSResponse(parsedQuery.id, parsedResponse.answers, processingTime);
+				}
+
+				const httpResponse = DNSResponse.createUpstreamHttpResponse(responseBuffer, res);
+
+				const ttl = extractTTLFromResponse(responseBuffer);
+				await cacheResponse(cacheKey, httpResponse, ttl);
+
+				httpResponse.headers.set('X-DNS-Cache-Hit', 'false');
+				return httpResponse;
 			}
 
 			return res;

@@ -1,13 +1,13 @@
 import dnsPacket from 'dns-packet';
-import { ParsedDNSQuery, DNSResponseOptions } from '../types/dns.js';
+import { ParsedDNSQuery } from '../../types/dns';
 import {
 	BLOCKED_RESPONSE_TTL,
+	DNS_RECORD_TYPES,
 	BLOCKED_IPV4_ADDRESS,
 	BLOCKED_IPV6_ADDRESS,
-	DNS_RECORD_TYPES,
 	DNS_MESSAGE_CONTENT_TYPE,
 	BLOCKED_RESPONSE_CACHE_CONTROL,
-} from '../utils/constants.js';
+} from '../constants';
 
 export class DNSResponse {
 	/**

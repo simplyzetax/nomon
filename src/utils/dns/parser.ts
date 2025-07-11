@@ -1,6 +1,6 @@
 import dnsPacket from 'dns-packet';
-import { ParsedDNSQuery, ParsedDNSResponse, DNSQuestion } from '../types/dns.js';
-import { Logger } from '../utils/logger.js';
+import { ParsedDNSQuery, ParsedDNSResponse, DNSQuestion } from '../../types/dns';
+import { Logger } from '../logger';
 
 export class DNSParser {
 	/**
