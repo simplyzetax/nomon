@@ -6,7 +6,6 @@ import { Logger } from './utils/logger';
 import { DOH_ENDPOINT, DOH_JSON_ENDPOINT, DNS_MESSAGE_CONTENT_TYPE, DNS_JSON_CONTENT_TYPE } from './utils/constants';
 import { DNSStorage } from './durable-objects/storage';
 import type { DNSQuestion } from './types/dns';
-import migrations from '../drizzle/migrations.js';
 import {
 	generateCacheKey,
 	getCachedResponse,
