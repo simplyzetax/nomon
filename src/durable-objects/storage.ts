@@ -3,12 +3,16 @@ import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlit
 import { eq, and, sql } from 'drizzle-orm';
 import { blocklistEntries, systemStats } from '../db/schema.js';
 import { COMPILED_BLOCKLIST } from 'virtual:compiled-blocklist';
+import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
+import migrations from '../../drizzle/migrations.js';
 
 export class DNSStorage extends DurableObject {
 	private db: DrizzleSqliteDODatabase<any>;
+	env: Env;
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
+		this.env = env;
 		this.db = drizzle(ctx.storage, { logger: false });
 
 		// Make sure all migrations complete before accepting queries
@@ -20,108 +24,10 @@ export class DNSStorage extends DurableObject {
 
 	private async _migrate() {
 		try {
-			await this._ensureTablesExist();
+			await migrate(this.db, migrations);
 		} catch (error) {
 			console.error('Migration failed:', error);
 		}
-	}
-
-	private async _ensureTablesExist() {
-		try {
-			await this.db.select({ key: systemStats.key }).from(systemStats).limit(1);
-			console.log('Database tables already exist.');
-			return;
-		} catch (e) {
-			console.log('Database tables not found, creating them...');
-		}
-
-		// prettier-ignore
-		const schema = `
-CREATE TABLE \`blocked_domains_log\` (
-	\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	\`domain\` text NOT NULL,
-	\`blocked_at\` integer DEFAULT (unixepoch()) NOT NULL,
-	\`reason\` text NOT NULL,
-	\`exact_match\` integer NOT NULL,
-	\`parent_domain\` text,
-	\`query_log_id\` integer,
-	FOREIGN KEY (\`query_log_id\`) REFERENCES \`dns_query_logs\`(\`id\`) ON UPDATE no action ON DELETE set null
-);
---> statement-breakpoint
-CREATE TABLE \`blocklist_entries\` (
-	\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	\`domain\` text NOT NULL,
-	\`source\` text,
-	\`added_at\` integer DEFAULT (unixepoch()) NOT NULL,
-	\`is_active\` integer DEFAULT true NOT NULL
-);
---> statement-breakpoint
-CREATE TABLE \`dns_answers\` (
-	\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	\`log_id\` integer NOT NULL,
-	\`name\` text NOT NULL,
-	\`type\` text NOT NULL,
-	\`class\` text DEFAULT 'IN',
-	\`ttl\` integer NOT NULL,
-	\`data\` text,
-	FOREIGN KEY (\`log_id\`) REFERENCES \`dns_query_logs\`(\`id\`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
-CREATE TABLE \`dns_query_logs\` (
-	\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	\`query_id\` integer NOT NULL,
-	\`timestamp\` integer DEFAULT (unixepoch()) NOT NULL,
-	\`client_ip\` text,
-	\`query_type\` text NOT NULL,
-	\`blocked\` integer DEFAULT false NOT NULL,
-	\`processing_time_ms\` integer
-);
---> statement-breakpoint
-CREATE TABLE \`dns_questions\` (
-	\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	\`log_id\` integer NOT NULL,
-	\`name\` text NOT NULL,
-	\`type\` text NOT NULL,
-	\`class\` text DEFAULT 'IN' NOT NULL,
-	FOREIGN KEY (\`log_id\`) REFERENCES \`dns_query_logs\`(\`id\`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
-CREATE TABLE \`system_stats\` (
-	\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	\`key\` text NOT NULL,
-	\`value\` text NOT NULL,
-	\`updated_at\` integer DEFAULT (unixepoch()) NOT NULL
-);
---> statement-breakpoint
-CREATE INDEX \`blocked_domains_domain_idx\` ON \`blocked_domains_log\` (\`domain\`);
---> statement-breakpoint
-CREATE INDEX \`blocked_domains_blocked_at_idx\` ON \`blocked_domains_log\` (\`blocked_at\`);
---> statement-breakpoint
-CREATE UNIQUE INDEX \`blocklist_entries_domain_unique\` ON \`blocklist_entries\` (\`domain\`);
---> statement-breakpoint
-CREATE INDEX \`blocklist_domain_idx\` ON \`blocklist_entries\` (\`domain\`);
---> statement-breakpoint
-CREATE INDEX \`dns_answers_log_id_idx\` ON \`dns_answers\` (\`log_id\`);
---> statement-breakpoint
-CREATE INDEX \`dns_logs_timestamp_idx\` ON \`dns_query_logs\` (\`timestamp\`);
---> statement-breakpoint
-CREATE INDEX \`dns_logs_blocked_idx\` ON \`dns_query_logs\` (\`blocked\`);
---> statement-breakpoint
-CREATE INDEX \`dns_questions_log_id_idx\` ON \`dns_questions\` (\`log_id\`);
---> statement-breakpoint
-CREATE INDEX \`dns_questions_name_idx\` ON \`dns_questions\` (\`name\`);
---> statement-breakpoint
-CREATE UNIQUE INDEX \`system_stats_key_unique\` ON \`system_stats\` (\`key\`);
-`;
-
-		const statements = schema.split('--> statement-breakpoint');
-		for (const statement of statements) {
-			if (statement.trim()) {
-				await this.db.run(sql.raw(statement));
-			}
-		}
-
-		console.log('Database tables created manually.');
 	}
 
 	private async _migrateBlocklist() {
@@ -129,16 +35,12 @@ CREATE UNIQUE INDEX \`system_stats_key_unique\` ON \`system_stats\` (\`key\`);
 		const existingStats = await this.db.select().from(systemStats).where(eq(systemStats.key, 'blocklist_migrated')).limit(1);
 
 		if (existingStats.length === 0) {
-			console.log('Initializing blocklist system...');
-
 			await this.db.insert(systemStats).values([
 				{ key: 'blocklist_migrated', value: 'true' },
 				{ key: 'total_queries', value: '0' },
 				{ key: 'total_blocked', value: '0' },
 				{ key: 'blocklist_size', value: '0' },
 			]);
-
-			console.log(`Using in-memory compiled blocklist with ${COMPILED_BLOCKLIST?.size || 0} domains`);
 
 			await this._updateBlocklistSize();
 		}
@@ -283,24 +185,6 @@ CREATE UNIQUE INDEX \`system_stats_key_unique\` ON \`system_stats\` (\`key\`);
 				target: systemStats.key,
 				set: {
 					value: totalCount.toString(),
-					updatedAt: sql`(unixepoch())`,
-				},
-			});
-	}
-
-	private async _incrementStat(key: string): Promise<void> {
-		const current = await this.db.select({ value: systemStats.value }).from(systemStats).where(eq(systemStats.key, key)).limit(1);
-
-		const currentValue = current.length > 0 ? parseInt(current[0].value) : 0;
-		const newValue = currentValue + 1;
-
-		await this.db
-			.insert(systemStats)
-			.values({ key, value: newValue.toString() })
-			.onConflictDoUpdate({
-				target: systemStats.key,
-				set: {
-					value: newValue.toString(),
 					updatedAt: sql`(unixepoch())`,
 				},
 			});

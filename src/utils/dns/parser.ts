@@ -63,34 +63,4 @@ export class DNSParser {
 	static extractDomains(questions: DNSQuestion[]): string[] {
 		return questions.map((q) => q.name.toLowerCase());
 	}
-
-	/**
-	 * Log parsed DNS query information
-	 */
-	static logQuery(parsed: ParsedDNSQuery, source: string = 'QUERY') {
-		Logger.log(`Parsed DNS ${source}:`, {
-			id: parsed.id,
-			type: parsed.type,
-			questions: parsed.questions.map((q) => ({
-				name: q.name,
-				type: q.type,
-				class: q.class,
-			})),
-		});
-	}
-
-	/**
-	 * Log parsed DNS response information
-	 */
-	static logResponse(parsed: ParsedDNSResponse, source: string = 'RESPONSE') {
-		Logger.log(`Parsed DNS ${source}:`, {
-			id: parsed.id,
-			type: parsed.type,
-			answers: parsed.answers?.map((a) => ({
-				name: a.name,
-				type: a.type,
-				...(a as any),
-			})),
-		});
-	}
 }

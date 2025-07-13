@@ -1,4 +1,4 @@
-import { Logger } from '../utils/logger.js';
+import { Logger } from '../logger';
 
 export class BlocklistLoader {
 	private static blockedDomains: Set<string> | null = null;
@@ -7,55 +7,8 @@ export class BlocklistLoader {
 	/**
 	 * Load a pre-compiled blocklist (from Vite plugin)
 	 */
-	static loadCompiledBlocklist(compiledBlocklist: Set<string>, stats?: any): void {
+	static loadCompiledBlocklist(compiledBlocklist: Set<string>): void {
 		this.blockedDomains = compiledBlocklist;
-		this.stats = stats;
-
-		Logger.log(`Loaded pre-compiled blocklist with ${compiledBlocklist.size} blocked domains`);
-
-		if (stats) {
-			Logger.log('Blocklist compilation stats:', {
-				totalDomains: stats.totalDomains,
-				compilationTime: stats.compilationTime,
-				sourceFile: stats.sourceFile,
-				compiledAt: stats.compiledAt,
-			});
-		}
-	}
-
-	/**
-	 * Legacy method: Parse and load the blocklist from hosts file content (runtime parsing)
-	 * @deprecated Use pre-compiled blocklist from Vite plugin instead
-	 */
-	static loadBlocklist(content: string): void {
-		Logger.warn('Using legacy runtime parsing. Consider using pre-compiled blocklist for better performance.');
-
-		this.blockedDomains = new Set<string>();
-
-		const lines = content.split('\n');
-		const LOCALHOST_DOMAINS = ['localhost', 'localhost.localdomain', 'local', 'broadcasthost'];
-
-		for (const line of lines) {
-			const trimmed = line.trim();
-
-			// Skip comments and empty lines
-			if (!trimmed || trimmed.startsWith('#')) {
-				continue;
-			}
-
-			// Parse hosts file format: IP_ADDRESS DOMAIN
-			const parts = trimmed.split(/\s+/);
-			if (parts.length >= 2) {
-				const domain = parts[1].toLowerCase();
-
-				// Skip localhost entries
-				if (!LOCALHOST_DOMAINS.includes(domain)) {
-					this.blockedDomains.add(domain);
-				}
-			}
-		}
-
-		Logger.log(`Loaded ${this.blockedDomains.size} blocked domains from runtime parsing`);
 	}
 
 	/**

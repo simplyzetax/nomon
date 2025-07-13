@@ -6,6 +6,7 @@ import { Logger } from './utils/logger';
 import { DOH_ENDPOINT, DOH_JSON_ENDPOINT, DNS_MESSAGE_CONTENT_TYPE, DNS_JSON_CONTENT_TYPE } from './utils/constants';
 import { DNSStorage } from './durable-objects/storage';
 import type { DNSQuestion } from './types/dns';
+import migrations from '../drizzle/migrations.js';
 import {
 	generateCacheKey,
 	getCachedResponse,
@@ -21,8 +22,13 @@ export { DNSStorage } from './durable-objects/storage';
 const app = new Hono<{
 	Bindings: {
 		DNS_STORAGE: DurableObjectNamespace<DNSStorage>;
+		KV: KVNamespace;
 	};
 }>();
+
+app.get('/migrations', async (c) => {
+	return c.json(migrations);
+});
 
 app.get('/stats', async (c) => {
 	const colo = c.req.raw.cf?.colo;
@@ -68,7 +74,6 @@ app.get('*', async (c) => {
 		const startTime = Date.now();
 		try {
 			const parsedQuery = DNSParser.parseBase64Query(dns);
-			DNSParser.logQuery(parsedQuery);
 
 			const cacheKey = generateCacheKey(parsedQuery.questions);
 
@@ -108,11 +113,6 @@ app.get('*', async (c) => {
 
 			if (res.ok) {
 				const responseBuffer = await res.arrayBuffer();
-				const parsedResponse = DNSParser.parseResponse(Buffer.from(responseBuffer));
-				DNSParser.logResponse(parsedResponse);
-
-				const processingTime = Date.now() - startTime;
-
 				const httpResponse = DNSResponse.createUpstreamHttpResponse(responseBuffer, res);
 
 				const ttl = extractTTLFromResponse(responseBuffer);
@@ -153,9 +153,7 @@ app.post('*', async (c) => {
 		return c.json({ error: 'Invalid request' }, 400);
 	}
 
-	Logger.log('POST request received');
 	const coloId = c.env.DNS_STORAGE.idFromName(colo);
-	Logger.log('Colo ID:', coloId);
 
 	if (contentType === DNS_MESSAGE_CONTENT_TYPE) {
 		const startTime = Date.now();
@@ -163,7 +161,6 @@ app.post('*', async (c) => {
 			const requestBody = await c.req.arrayBuffer();
 			const requestBuffer = Buffer.from(requestBody);
 			const parsedQuery = DNSParser.parseRawQuery(requestBuffer);
-			DNSParser.logQuery(parsedQuery, 'QUERY (POST)');
 
 			const cacheKey = generateCacheKey(parsedQuery.questions);
 
@@ -206,7 +203,6 @@ app.post('*', async (c) => {
 			if (res.ok) {
 				const responseBuffer = await res.arrayBuffer();
 				const parsedResponse = DNSParser.parseResponse(Buffer.from(responseBuffer));
-				DNSParser.logResponse(parsedResponse, 'RESPONSE (POST)');
 
 				const processingTime = Date.now() - startTime;
 

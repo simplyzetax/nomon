@@ -41,10 +41,8 @@ export async function getCachedResponse(cacheKey: string): Promise<Response | nu
 		const request = new Request(cacheKey);
 		const cachedResponse = await cache.match(request);
 		if (cachedResponse) {
-			Logger.log('Cache HIT for key:', cacheKey);
 			return cachedResponse;
 		}
-		Logger.log('Cache MISS for key:', cacheKey);
 		return null;
 	} catch (error) {
 		Logger.error('Error checking cache:', error);
@@ -71,7 +69,6 @@ export async function cacheResponse(cacheKey: string, response: Response, ttl: n
 
 		const request = new Request(cacheKey);
 		await cache.put(request, cachedResponse);
-		Logger.log(`Cached response for key: ${cacheKey} with TTL: ${ttl}s`);
 	} catch (error) {
 		Logger.error('Error caching response:', error);
 	}

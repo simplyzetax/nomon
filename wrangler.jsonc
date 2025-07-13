@@ -35,7 +35,12 @@
 			"new_sqlite_classes": ["DNSStorage"]
 		}
 	],
-
+	"kv_namespaces": [
+		{
+		  "binding": "KV",
+		  "id": "1f4919017915449aa00a120d4d74a66a"
+		}
+	  ],
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
