@@ -26,10 +26,6 @@ const app = new Hono<{
 	};
 }>();
 
-app.get('/migrations', async (c) => {
-	return c.json(migrations);
-});
-
 app.get('/stats', async (c) => {
 	const colo = c.req.raw.cf?.colo;
 	if (!colo || typeof colo !== 'string') {
