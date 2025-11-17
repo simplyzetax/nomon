@@ -1,5 +1,7 @@
 # 🛡️ DoH Proxy with Pi-hole Blocking
 
+NOTE: While I have been using it personally for a while, it is still unreliable and still seemingly fails at random times. Do not use this as your main DNS resolver for now
+
 A high-performance DNS-over-HTTPS proxy built for Cloudflare Workers with integrated Pi-hole blocklist filtering.
 
 ## TODO
